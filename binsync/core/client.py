@@ -74,7 +74,8 @@ class Client:
         init_repo: bool = False,
         remote_url: Optional[str] = None,
         ssh_agent_pid: Optional[int] = None,
-        ssh_auth_sock: Optional[str] = None
+        ssh_auth_sock: Optional[str] = None,
+        enforce_repo_lock: Optional[str] = True
     ):
         """
         The Client class is responsible for making the low-level Git operations for the BinSync environment.
@@ -97,6 +98,7 @@ class Client:
         self.remote = remote
         self.repo = None
         self.repo_lock = None
+        self.enforce_repo_lock = enforce_repo_lock
 
         # validate this username can exist
         if master_user.endswith('/') or '__root__' in master_user:
@@ -215,13 +217,14 @@ class Client:
 
         assert not self.repo.bare, "it should not be a bare repo"
 
-        self.repo_lock = filelock.FileLock(self.repo_root + "/.git/binsync.lock")
-        try:
-            self.repo_lock.acquire(timeout=0)
-        except filelock.Timeout as e:
-            raise Exception("Can only have one binsync client touching a local repository at once.\n"
-                            "If the previous client crashed, you need to delete " + self.repo_root +
-                            "/.git/binsync.lock") from e
+        if self.enforce_repo_lock:
+            self.repo_lock = filelock.FileLock(self.repo_root + "/.git/binsync.lock")
+            try:
+                self.repo_lock.acquire(timeout=0)
+            except filelock.Timeout as e:
+                raise Exception("Can only have one binsync client touching a local repository at once.\n"
+                                "If the previous client crashed, you need to delete " + self.repo_root +
+                                "/.git/binsync.lock") from e
 
         return self.repo
 

@@ -1,0 +1,299 @@
+binary = "fauxware"
+md5 = "adde5c63daffab89beba8c074bf88761"
+
+[functions.4195552]
+name = "_init"
+variables = []
+arguments = []
+return_type = "int"
+
+[functions.4195584]
+name = "sub_400500"
+arguments = []
+return_type = "int"
+[[functions.4195584.variables]]
+name = "v0"
+offset = -8
+
+[functions.4195712]
+name = "_start"
+arguments = []
+return_type = "int"
+[[functions.4195712.variables]]
+name = "v0"
+offset = 0
+
+[[functions.4195712.variables]]
+name = "v3"
+
+[functions.4195756]
+name = "call_gmon_start"
+variables = []
+arguments = []
+return_type = "int"
+
+[functions.4195792]
+name = "__do_global_dtors_aux"
+arguments = []
+return_type = "int"
+[[functions.4195792.variables]]
+name = "v1"
+
+[[functions.4195792.variables]]
+name = "v1"
+
+[[functions.4195792.variables]]
+name = "v1"
+
+[functions.4195904]
+name = "frame_dummy"
+variables = []
+arguments = []
+return_type = "int"
+
+[functions.4195940]
+name = "authenticate"
+return_type = "int"
+[[functions.4195940.variables]]
+name = "a0"
+
+[[functions.4195940.variables]]
+name = "a1"
+
+[[functions.4195940.variables]]
+name = "v1"
+offset = -32
+
+[[functions.4195940.variables]]
+name = "v0"
+offset = -40
+
+[[functions.4195940.variables]]
+name = "v3"
+offset = -16
+
+[[functions.4195940.variables]]
+name = "v7"
+
+[[functions.4195940.variables]]
+name = "v9"
+
+[[functions.4195940.variables]]
+name = "v9"
+
+[[functions.4195940.variables]]
+name = "v4"
+offset = -12
+
+[[functions.4195940.variables]]
+name = "v10"
+
+[[functions.4195940.variables]]
+name = "v2"
+offset = -24
+
+[[functions.4195940.variables]]
+name = "v9"
+
+[[functions.4195940.variables]]
+name = "v9"
+
+[[functions.4195940.arguments]]
+idx = 0
+name = "a0"
+type = "char *"
+size = 8
+
+[[functions.4195940.arguments]]
+idx = 1
+name = "a1"
+type = "char *"
+size = 8
+
+[functions.4196077]
+name = "accepted"
+variables = []
+arguments = []
+return_type = "int"
+
+[functions.4196093]
+name = "rejected"
+variables = []
+arguments = []
+return_type = "int"
+
+[functions.4196125]
+name = "main"
+return_type = "int"
+[[functions.4196125.variables]]
+name = "a0"
+
+[[functions.4196125.variables]]
+name = "a1"
+
+[[functions.4196125.variables]]
+name = "v1"
+offset = -60
+
+[[functions.4196125.variables]]
+name = "v0"
+offset = -72
+
+[[functions.4196125.variables]]
+name = "v6"
+offset = -16
+
+[[functions.4196125.variables]]
+name = "v4"
+offset = -32
+
+[[functions.4196125.variables]]
+name = "v5"
+offset = -24
+
+[[functions.4196125.variables]]
+name = "v2"
+offset = -44
+
+[[functions.4196125.variables]]
+name = "v3"
+offset = -40
+
+[[functions.4196125.variables]]
+name = "v2"
+offset = -44
+
+[[functions.4196125.arguments]]
+idx = 0
+name = "a0"
+type = "unsigned long"
+size = 8
+
+[[functions.4196125.arguments]]
+idx = 1
+name = "a1"
+type = "unsigned long"
+size = 8
+
+[functions.4196320]
+name = "__libc_csu_init"
+return_type = "int"
+[[functions.4196320.variables]]
+name = "v5"
+
+[[functions.4196320.variables]]
+name = "v4"
+
+[[functions.4196320.variables]]
+name = "v2"
+
+[[functions.4196320.variables]]
+name = "v6"
+
+[[functions.4196320.variables]]
+name = "v7"
+
+[[functions.4196320.variables]]
+name = "v8"
+
+[[functions.4196320.variables]]
+name = "v1"
+
+[[functions.4196320.variables]]
+name = "v1"
+
+[[functions.4196320.variables]]
+name = "v3"
+
+[[functions.4196320.variables]]
+name = "v2"
+
+[[functions.4196320.variables]]
+name = "v4"
+
+[[functions.4196320.variables]]
+name = "v5"
+
+[[functions.4196320.variables]]
+name = "v1"
+
+[[functions.4196320.variables]]
+name = "v3"
+
+[[functions.4196320.variables]]
+name = "v3"
+
+[[functions.4196320.arguments]]
+idx = 0
+name = "v5"
+type = "unsigned long long"
+size = 8
+
+[[functions.4196320.arguments]]
+idx = 1
+name = "v4"
+type = "unsigned long long"
+size = 8
+
+[[functions.4196320.arguments]]
+idx = 2
+name = "v2"
+type = "unsigned long long"
+size = 8
+
+[functions.4196464]
+name = "__libc_csu_fini"
+arguments = []
+return_type = "int"
+[[functions.4196464.variables]]
+name = "v1"
+
+[functions.4196480]
+name = "__do_global_ctors_aux"
+arguments = []
+return_type = "int"
+[[functions.4196480.variables]]
+name = "v1"
+
+[[functions.4196480.variables]]
+name = "v3"
+
+[[functions.4196480.variables]]
+name = "v3"
+
+[[functions.4196480.variables]]
+name = "v3"
+
+[[functions.4196480.variables]]
+name = "v1"
+
+[functions.4196536]
+name = "_fini"
+variables = []
+arguments = []
+return_type = "int"
+
+[globals.6295640]
+name = "dtor_idx.6533"
+size = 8
+type = "struct_0"
+
+[globals.6295632]
+name = "__bss_start"
+size = 1
+type = "char"
+
+[globals.6295112]
+name = "__JCR_END__"
+size = 8
+type = "struct_0"
+
+[globals.6295624]
+name = "sneaky"
+size = 8
+type = "struct_0"
+
+[globals.6295080]
+name = "__CTOR_LIST__"
+size = 8
+type = "struct_0"
