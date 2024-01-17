@@ -1,12 +1,15 @@
 import datetime
+from enum import Enum
 import logging
 import os
 import pathlib
 import re
 import subprocess
-from xmlrpc.client import ServerProxy
 from functools import wraps
 from typing import Iterable, Optional, Dict
+
+from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
+import threading
 
 import filelock
 import git
@@ -14,7 +17,6 @@ import git.exc
 
 from binsync.core.cache import Cache
 from binsync.core.errors import ExternalUserCommitError, MetadataNotFoundError
-from binsync.core.git_server import GitServer, GitServerMode
 from binsync.core.scheduler import SchedSpeed, Scheduler, Job
 from binsync.data import GlobalConfig, User
 from binsync.data.state import State, load_toml_from_file
@@ -29,6 +31,16 @@ logging.getLogger("git").setLevel(logging.ERROR)
 class ConnectionWarnings:
     HASH_MISMATCH = 0
 
+
+class GitServerMode(Enum):
+    """
+    The GitServerMode enum is used to determine what mode the GitServer is in. This is used to determine
+    what actions the GitServer will take when it is updated. The currently supported modes are:
+    1. Object mode: does not spin up a real server at all and instead just does the operations in the same thread
+    2. Server mode: spins up a server and takes requests over a PyRPC to do Git operations
+    """
+    OBJECT = 1
+    SERVER = 2
 
 def atomic_git_action(f):
     """
@@ -45,7 +57,7 @@ def atomic_git_action(f):
     """
 
     @wraps(f)
-    def _atomic_git_action(self: "Client", *args, **kwargs):
+    def _atomic_git_action(self: "GitServer", *args, **kwargs):
         no_cache = kwargs.get("no_cache", False)
         if not no_cache:
             # cache check
@@ -68,23 +80,23 @@ def atomic_git_action(f):
     return _atomic_git_action
 
 
-class Client:
+class GitServer:
     def __init__(
-        self,
-        master_user: str,
-        repo_root: str,
-        binary_hash: bytes,
-        remote: str = "origin",
-        commit_interval: int = 10,
-        init_repo: bool = False,
-        remote_url: Optional[str] = None,
-        ssh_agent_pid: Optional[int] = None,
-        ssh_auth_sock: Optional[str] = None,
-        push_on_update=True,
-        pull_on_update=True,
-        commit_on_update=True,
-        use_git_server=False,
-        **kwargs,
+            self,
+            master_user: str,
+            repo_root: str,
+            binary_hash: bytes,
+            remote: str = "origin",
+            commit_interval: int = 10,
+            init_repo: bool = False,
+            remote_url: Optional[str] = None,
+            ssh_agent_pid: Optional[int] = None,
+            ssh_auth_sock: Optional[str] = None,
+            push_on_update=True,
+            pull_on_update=True,
+            commit_on_update=True,
+            server_mode: GitServerMode = GitServerMode.OBJECT,
+            **kwargs,
     ):
         """
         The Client class is responsible for making the low-level Git operations for the BinSync environment.
@@ -101,6 +113,7 @@ class Client:
         :param ssh_agent_pid:       SSH Agent PID
         :param ssh_auth_sock:       SSH Auth Socket
         """
+        self.server_mode = server_mode
         self.master_user = master_user
         self.repo_root = repo_root
         self.binary_hash = binary_hash
@@ -116,8 +129,8 @@ class Client:
             raise Exception(f"Bad username: {master_user}")
 
         # ssh-agent info
-        self.ssh_agent_pid: Optional[int] = ssh_agent_pid  # type: int
-        self.ssh_auth_sock: Optional[str] = ssh_auth_sock  # type: str
+        self.ssh_agent_pid: Optional[int] = ssh_agent_pid
+        self.ssh_auth_sock: Optional[str] = ssh_auth_sock
         self.connection_warnings = []
 
         # job scheduler
@@ -125,9 +138,11 @@ class Client:
         self.scheduler = Scheduler()
 
         # create, init, and checkout Git repo
-        self.repo = self._get_or_init_binsync_repo(remote_url, init_repo)
-        self.scheduler.start_worker_thread()
-        self._get_or_init_user_branch()
+        # Assume that the repo is already initialized if it exists
+        if self.server_mode == GitServerMode.OBJECT:
+            self.repo = self._get_or_init_binsync_repo(remote_url, init_repo)
+            self.scheduler.start_worker_thread()
+            self._get_or_init_user_branch()
 
         # timestamps
         self._commit_interval = commit_interval  # type: datetime.datetime
@@ -142,23 +157,15 @@ class Client:
 
         self.active_remote = True
 
-        # Creation/Usage of a Git Server
-        self.use_git_server = use_git_server
-        # Initialize the Git Server if needed
-        self.server_proxy = None
-        if self.use_git_server:
-            try:
-                # Pass in the Client object to the GitServer for testing convenience
-                """
-                TODO: When this fails it'll usually be because the port is already in use. In this case we 
-                should try to just make a server proxy instead of initializing a new GitServer.
-                That way we have multiple clients 
-                """
-                self.git_server = GitServer(server_mode=GitServerMode.SERVER, **self.__dict__)
-                self.server_proxy = ServerProxy(f"http://localhost:6969/RPC2")
-
-            except Exception as e:
-                log.exception(f"Failed to initialize Git Server: {e}")
+        # start the server mode if we are in server mode in a new thread
+        self.server_mode = server_mode
+        self.shutdown_event = threading.Event()
+        if self.server_mode == GitServerMode.SERVER:
+            self.server = None
+            # TODO: Test gracefully stopping the server
+            self.server_thread = threading.Thread(target=self._init_server_mode)
+            self.server_thread.daemon = True
+            self.server_thread.start()
 
     def __del__(self):
         if self.repo_lock is not None:
@@ -167,6 +174,51 @@ class Client:
     #
     # Initializers
     #
+
+    def _init_server_mode(self):
+        """
+        Starts the server mode of the GitServer. This will start a PyRPC server that will listen for requests
+        to do Git operations. This is the mode that is used when the GitServer is used as a remote server.
+
+        @return:
+        """
+
+        class RequestHandler(SimpleXMLRPCRequestHandler):
+            rpc_paths = ('/RPC2',)
+
+        self.server = SimpleXMLRPCServer(("localhost", 6969), requestHandler=RequestHandler)
+        self.server.register_introspection_functions()
+        self.server.register_function(self.commit_state, "commit_state")
+        self.server.register_function(self.users, "users")
+        self.server.register_function(self.get_state, "get_state")
+        self.server.register_function(self.pull, "pull")
+        self.server.register_function(self.push, "push")
+        self.server.register_function(self.has_remote, "has_remote")
+        self.server.register_function(self.echo, "echo")  # TODO: Remove this, it's just for testing
+        self.server.register_function(self.stop_server, "stop_server")
+        self.server.serve_forever()
+
+    def echo(self, msg):
+        return msg
+
+    def stop_server(self):
+        """
+        Stops the server mode of the GitServer. This will stop the PyRPC server that is listening for requests
+        to do Git operations. This is the mode that is used when the GitServer is used as a remote server.
+
+        @return:
+        """
+
+        if self.server is not None:
+            print("Stopping server")
+            self.shutdown_event.set()
+            self.server.shutdown()
+        else:
+            print("Server might be already running, not started, or already stopped.")
+        if self.server_thread:
+            # Gracefully stop the server thread with a timeout
+            self.server_thread.join(timeout=3)
+
 
     def _load_or_update_config(self):
         config = GlobalConfig.load_from_file(None) or GlobalConfig(None)
@@ -266,7 +318,7 @@ class Client:
             f.write(".git/*\n")
         with open(os.path.join(self.repo_root, "binary_hash"), "w") as f:
             # TODO: Check if binary hash works with bytes decoded.
-            f.write(self.binary_hash)
+            f.write(self.binary_hash.decode())
         self.repo.index.add([".gitignore", "binary_hash"])
         self.repo.index.commit("Root commit")
         self.repo.create_head(BINSYNC_ROOT_BRANCH)
@@ -297,10 +349,6 @@ class Client:
 
     @atomic_git_action
     def commit_state(self, state, msg="Generic Change", priority=None):
-        # Use the server if it's available
-        if self.use_git_server:
-            return self.server_proxy.commit_state(state, msg)
-
         if self.master_user != state.user:
             raise ExternalUserCommitError(f"User {self.master_user} is not allowed to commit to user {state.user}")
 
@@ -329,10 +377,6 @@ class Client:
 
     @atomic_git_action
     def users(self, priority=None, no_cache=False) -> Iterable[User]:
-        # Use the server if it's available
-        if self.use_git_server:
-            return self.server_proxy.users()
-
         repo = self.repo
         attempt_again = True
         attempted_fix = False
@@ -343,13 +387,13 @@ class Client:
             attempt_again = False
             users = list()
             for ref in self._get_best_refs(repo, force_local=force_local_users).values():
-                #l.debug(f"{ref} NAME: {ref.name}")
+                # l.debug(f"{ref} NAME: {ref.name}")
                 try:
                     metadata = load_toml_from_file(ref.commit.tree, "metadata.toml", client=self)
                     user = User.from_metadata(metadata)
                     users.append(user)
                 except Exception:
-                    #l.debug(f"Unable to load user {e}")
+                    # l.debug(f"Unable to load user {e}")
                     continue
 
             if not attempted_fix and not users:
@@ -362,10 +406,6 @@ class Client:
 
     @atomic_git_action
     def get_state(self, user=None, version=None, priority=None, no_cache=False):
-        # Use the server if it's available
-        if self.use_git_server:
-            return self.server_proxy.get_state(user, version)
-
         if user is None:
             user = self.master_user
 
@@ -396,10 +436,6 @@ class Client:
 
         :return:    None
         """
-        # Use the server if it's available
-        if self.use_git_server:
-            self.server_proxy.pull()
-
         self.last_pull_attempt_time = datetime.datetime.now(tz=datetime.timezone.utc)
         try:
             env = self.ssh_agent_env()
@@ -416,7 +452,7 @@ class Client:
                 self._last_pull_time = datetime.datetime.now(tz=datetime.timezone.utc)
                 self.active_remote = True
             except Exception:
-                #l.debug(f"Pull exception {e}")
+                # l.debug(f"Pull exception {e}")
                 self.active_remote = False
 
         if not self.active_remote:
@@ -431,7 +467,7 @@ class Client:
             try:
                 self.repo.git.merge()
             except Exception:
-                #l.debug(f"Failed to merge on {branch} with {e}")
+                # l.debug(f"Failed to merge on {branch} with {e}")
                 pass
 
         self._update_cache()
@@ -444,10 +480,6 @@ class Client:
 
         :return:    None
         """
-        # Use the server if it's available
-        if self.use_git_server:
-            self.server_proxy.push()
-
         self.last_push_attempt_time = datetime.datetime.now(tz=datetime.timezone.utc)
         self._checkout_to_master_user()
         try:
@@ -463,7 +495,7 @@ class Client:
             self.active_remote = False
             log.debug(f"Failed to push b/c {ex}")
 
-    @property
+    # @property
     @atomic_git_action
     def has_remote(self, priority=SchedSpeed.FAST):
         """
@@ -471,22 +503,12 @@ class Client:
 
         :return:    True if there is a remote, False otherwise.
         """
-        if self.use_git_server:
-            return self.server_proxy.has_remote()
         return self.remote and any(r.name == self.remote for r in self.repo.remotes)
 
     #
     # Non-Atomic Public API
     #
 
-    def shutdown_server(self):
-        if self.use_git_server:
-            # TODO: Try using git_server to make requests instead of proxy to experiment.
-            self.git_server.stop_server()
-    def echo(self, msg):
-        if self.use_git_server:
-            return self.server_proxy.echo(msg)
-        return "Not using server"
     def all_states(self):
         states = list()
         # promises users in the vent of inability to get new users
@@ -513,11 +535,11 @@ class Client:
 
         # do a pull if there is a remote repo connected
         self.last_pull_attempt_time = datetime.datetime.now(tz=datetime.timezone.utc)
-        if self.has_remote and self.pull_on_update:
+        if self.has_remote() and self.pull_on_update:
             self.pull()
 
         self.last_push_attempt_time = datetime.datetime.now(tz=datetime.timezone.utc)
-        if self.has_remote and self.push_on_update:
+        if self.has_remote() and self.push_on_update:
             self.push()
 
     #
@@ -531,7 +553,6 @@ class Client:
 
         @return:
         """
-
 
         # get all remote branches
         try:
@@ -562,8 +583,6 @@ class Client:
             except git.GitCommandError:
                 continue
 
-
-
     def ssh_agent_env(self):
         if self.ssh_agent_pid is not None and self.ssh_auth_sock is not None:
             env = {
@@ -571,7 +590,7 @@ class Client:
                 'SSH_AUTH_SOCK': str(self.ssh_auth_sock),
             }
         else:
-            env = { }
+            env = {}
         return env
 
     def clone(self, remote_url, no_head_check=False):
@@ -603,6 +622,7 @@ class Client:
         """
         self.repo.git.checkout(self.user_branch_name)
 
+    # TODO: Remove from server implementation.
     @staticmethod
     def discover_ssh_agent(ssh_agent_cmd):
         proc = subprocess.Popen(ssh_agent_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -615,10 +635,10 @@ class Client:
             raise RuntimeError("Failed to discover SSH agent by running command %s.\n"
                                "Return code: %d.\n"
                                "stderr: %s" % (
-                ssh_agent_cmd,
-                proc.returncode,
-                stderr,
-            ))
+                                   ssh_agent_cmd,
+                                   proc.returncode,
+                                   stderr,
+                               ))
 
         # parse output
         m = re.search(r"Found ssh-agent at (\d+)", stdout)
@@ -636,7 +656,7 @@ class Client:
                 return None, None
             print("Found SSH_AGENT_SOCK")
             ssh_agent_sock = m.group(1)
-        else :
+        else:
             print("Found ssh-agent at")
             ssh_agent_pid = int(m.group(1))
             m = re.search(r"Found ssh-agent socket at ([^\s]+)", stdout)
@@ -664,7 +684,8 @@ class Client:
             Dict[str, git.Reference]: A dictionary of branch names and corresponding git.Reference objects.
         """
         candidates = {}
-        for ref in repo.refs:  # type: git.Reference
+        # type: git.Reference # Sorry if you need this typed, I think that type annotations for the parameter will help
+        for ref in repo.refs:
             if f'{BINSYNC_BRANCH_PREFIX}/' not in ref.name:
                 continue
 
@@ -792,11 +813,11 @@ class Client:
         set_func(ret_value, *args, **kwargs)
 
     def _update_cache(self):
-        #l.debug(f"Updating cache commits for State Cache...")
+        # l.debug(f"Updating cache commits for State Cache...")
         cache_dict = self._get_commits_for_users(git.Repo(self.repo_root))
         self.cache.update_state_cache_commits(cache_dict)
 
         cache_keys = [key for key in cache_dict.keys()]
-        #l.debug(f"Updating branches on Users Cache...")
+        # l.debug(f"Updating branches on Users Cache...")
         branch_set = set(cache_keys)
         self.cache.update_user_cache_branches(branch_set)
