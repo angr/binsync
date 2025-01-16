@@ -82,9 +82,10 @@ class BinsyncPlugin(GenericBSAngrManagementPlugin):
     # BinSync Menu
     #
 
-    MENU_BUTTONS = ('Start Binsync...', 'Toggle Binsync Panel')
+    MENU_BUTTONS = ('Start Binsync...', 'Toggle Binsync Panel', 'View Progress...')
     MENU_CONFIG_ID = 0
     MENU_TOGGLE_PANEL_ID = 1
+    MENU_VIEW_PROGRESS_ID = 2
 
     def handle_click_menu(self, idx):
         # sanity check on menu selection
@@ -96,7 +97,8 @@ class BinsyncPlugin(GenericBSAngrManagementPlugin):
 
         mapping = {
             self.MENU_CONFIG_ID: self.open_sync_config_dialog,
-            self.MENU_TOGGLE_PANEL_ID: self.toggle_sync_panel
+            self.MENU_TOGGLE_PANEL_ID: self.toggle_sync_panel,
+            self.MENU_VIEW_PROGRESS_ID: self.open_view_progress_window,
         }
 
         # call option mapped to each menu pos
@@ -123,3 +125,6 @@ class BinsyncPlugin(GenericBSAngrManagementPlugin):
     def toggle_sync_panel(self):
         self.workspace.view_manager.view_to_dock[self.control_panel_view].toggleView()
 
+    def open_view_progress_window(self):
+        from binsync.ui.progress_window import open_progress_window
+        open_progress_window(self.controller)
