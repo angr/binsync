@@ -2,13 +2,16 @@
 # @author BinSync Team
 # @category Collaboration
 # @menupath Tools.BinSync.Start UI...
+#@runtime PyGhidra
 
-plugin_command = "binsync -s ghidra"
-
+import sys
 
 def create_plugin(*args, **kwargs):
+    print("in creator")
     # REPLACE_ME this import with an import of your plugin's create_plugin function
     from binsync import create_plugin as _create_plugin
+    print(sys.executable)
+    print("running private create")
     return _create_plugin(*args, **kwargs)
 
 # =============================================================================
@@ -28,6 +31,8 @@ if sys.version[0] == "2":
     process = subprocess.Popen(plugin_command.split(" "))
     if process.poll() is not None:
         raise RuntimeError("Failed to run the Python3 backed. It's likely Python3 is not in your Path inside Ghidra.")
+else:
+    create_plugin()
 
 
 def PLUGIN_ENTRY(*args, **kwargs):

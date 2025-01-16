@@ -142,8 +142,8 @@ def main():
         if args.server != GHIDRA_DECOMPILER:
             raise ValueError("Only Ghidra is supported for use as a server")
 
-        from binsync.interface_overrides.ghidra import start_ghidra_remote_ui
-        start_ghidra_remote_ui()
+        from binsync.interface_overrides.ghidra import start_ghidra_ui
+        start_ghidra_ui()
 
     if EXTRAS_AVAILABLE and args.ai:
         if not (args.proj_path and args.binary_path):
